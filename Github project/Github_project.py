@@ -1,74 +1,81 @@
-﻿#激活环境需要执.\env\Scripts\activate
-#遇见带有空格的路径需要加引号（cd命令)
 import sys
-from PySide6.QtWidgets import QApplication, QWidget, QVBoxLayout, QPushButton, QLabel
-from PySide6.QtCore import Qt, QPropertyAnimation, QEasingCurve, QRect
-from PySide6.QtGui import QColor, QPalette
+from PySide6.QtWidgets import (
+    QApplication,
+    QWidget,
+    QPushButton,
+    QLabel,
+    QGraphicsDropShadowEffect,
+)
+from PySide6.QtCore import Qt, QPoint
+from PySide6.QtGui import QColor
+
 
 class ModernWindow(QWidget):
     def __init__(self):
         super().__init__()
-        
-        # 1. 窗口基础设置
-        self.setWindowTitle("原生现代感窗口")
-        self.resize(500, 400)
-        
-        # 设置深色背景主题
-        self.setStyleSheet("""
-            QWidget {
-                background-color: #1e1e1e;
+
+        self.setWindowTitle("毛玻璃窗口")
+        self.resize(520, 420)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setWindowFlags(Qt.FramelessWindowHint)
+
+        shadow = QGraphicsDropShadowEffect()
+        shadow.setBlurRadius(20)
+        shadow.setColor(QColor(255, 255, 255, 150))
+        shadow.setOffset(0, 0)
+        self.setGraphicsEffect(shadow)
+
+        self.drag_position = QPoint()
+
+        self.bg_index = 0
+        self.bg_colors = [
+            "rgba(40, 40, 40, 200)",
+            "rgba(20, 40, 80, 200)",
+            "rgba(80, 50, 30, 200)",
+            "rgba(60, 30, 80, 200)",
+            "rgba(0, 60, 80, 200)",
+        ]
+
+        self.setStyleSheet(f"""
+            QWidget {{
+                background: {self.bg_colors[0]};
+                border-radius: 15px;
                 color: white;
-                font-family: 'Microsoft YaHei';
-            }
-            QPushButton {
-                background-color: #0078d4;
-                border: none;
-                border-radius: 8px;
-                padding: 10px 20px;
-                font-size: 16px;
-            }
-            QPushButton:hover {
-                background-color: #2b88d8;
-            }
-            QPushButton:pressed {
-                background-color: #005a9e;
-            }
+            }}
         """)
 
-        # 2. 布局
-        layout = QVBoxLayout(self)
-        
-        self.label = QLabel("正在加载丝滑动画...", self)
-        self.label.setAlignment(Qt.AlignCenter)
-        layout.addWidget(self.label)
+        self.title_label = QLabel("毛玻璃窗口", self)
+        self.title_label.move(50, 15)
+        self.title_label.setStyleSheet(
+            "background: none; color: white; font-size: 14px;"
+        )
 
-        self.btn = QPushButton("开启丝滑缩放动画", self)
-        self.btn.clicked.connect(self.start_smooth_animation)
-        layout.addWidget(self.btn, 0, Qt.AlignCenter)
+        self.close_btn = QPushButton("", self)
+        self.close_btn.setFixedSize(24, 24)
+        self.close_btn.move(480, 12)
+        self.close_btn.setStyleSheet("""
+            QPushButton {
+                background: rgba(255, 80, 80, 200);
+                border-radius: 6px;
+                border: none;
+            }
+            QPushButton:hover { background: rgba(255, 60, 60, 230); }
+        """)
+        self.close_btn.clicked.connect(self.close)
 
-    def start_smooth_animation(self):
-        # 3. 丝滑动画实现：改变按钮的大小和位置
-        self.ani = QPropertyAnimation(self.btn, b"geometry")
-        self.ani.setDuration(600)  # 600毫秒
-        
-        start_rect = self.btn.geometry()
-        # 目标：按钮稍微变大一点
-        end_rect = QRect(start_rect.x() - 20, start_rect.y() - 5, 
-                         start_rect.width() + 40, start_rect.height() + 10)
-        
-        self.ani.setStartValue(start_rect)
-        self.ani.setEndValue(end_rect)
-        
-        # 关键：使用 OutQuint 曲线实现“丝滑感”
-        self.ani.setEasingCurve(QEasingCurve.OutQuint)
-        self.ani.start()
-        self.label.setText("动画已触发！")
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton and event.y() < 50:
+            self.drag_position = event.globalPosition().toPoint() - self.pos()
+            event.accept()
 
-if __name__ == '__main__':
+    def mouseMoveEvent(self, event):
+        if event.buttons() & Qt.LeftButton and event.y() < 50:
+            self.move(event.globalPosition().toPoint() - self.drag_position)
+            event.accept()
+
+
+if __name__ == "__main__":
     app = QApplication(sys.argv)
-    
-    # 创建并显示
     demo = ModernWindow()
     demo.show()
-    
     sys.exit(app.exec())
