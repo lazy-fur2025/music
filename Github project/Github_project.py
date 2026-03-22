@@ -19,15 +19,8 @@ class ModernWindow(QWidget):
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setWindowFlags(Qt.FramelessWindowHint)
 
-        shadow = QGraphicsDropShadowEffect()
-        shadow.setBlurRadius(20)
-        shadow.setColor(QColor(255, 255, 255, 150))
-        shadow.setOffset(0, 0)
-        self.setGraphicsEffect(shadow)
-
         self.drag_position = QPoint()
 
-        self.bg_index = 0
         self.bg_colors = [
             "rgba(40, 40, 40, 200)",
             "rgba(20, 40, 80, 200)",
