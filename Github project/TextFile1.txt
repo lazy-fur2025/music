@@ -1,0 +1,1 @@
+使用npm下载了npx NeteaseCloudMusicApi，尝试用js来实现歌词爬取。

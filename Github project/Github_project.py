@@ -1,6 +1,7 @@
 import sys
 import time
 import re
+import pygetwindow as gw
 import numpy as np
 import sounddevice as sd
 import requests
@@ -10,6 +11,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QLabel,
     QGraphicsOpacityEffect,
+    QHBoxLayout,
 )
 from PySide6.QtCore import (
     Qt,
@@ -26,39 +28,29 @@ from PySide6.QtGui import (
     QPen,
     QLinearGradient,
     QConicalGradient,
-    QBrush,
+    QRadialGradient,
+    QPainterPath,
 )
-from aip import AipSpeech
-
-APP_ID = "122613402"
-API_KEY = "55ceHhcq8vTBBKG0usu0q88G"
-SECRET_KEY = "IhsTwI87Lso8TbsTpvI7pXkW96EkBPlv"
-client = AipSpeech(APP_ID, API_KEY, SECRET_KEY)
 
 
 class AudioThread(QThread):
     audio_signal = Signal(np.ndarray)
 
-    def __init__(self):
-        super().__init__()
-        self.is_recording = False
-        self.record_buffer = []
-
     def run(self):
-        def callback(indata, frames, time, status):
+        def callback(indata, frames, time_info, status):
             if any(indata):
                 magnitude = np.abs(np.fft.rfft(indata[:, 0]))
                 chunks = np.array_split(magnitude, 15)
                 self.audio_signal.emit(np.array([np.mean(c) for c in chunks]))
-                if self.is_recording:
-                    audio_bytes = (indata * 32767).astype(np.int16).tobytes()
-                    self.record_buffer.append(audio_bytes)
 
-        with sd.InputStream(
-            callback=callback, channels=1, samplerate=16000, blocksize=1024
-        ):
-            while True:
-                self.sleep(1)
+        try:
+            with sd.InputStream(
+                callback=callback, channels=1, samplerate=None, blocksize=1024
+            ):
+                while True:
+                    self.sleep(1)
+        except:
+            pass
 
 
 class ModernWindow(QWidget):
@@ -67,195 +59,293 @@ class ModernWindow(QWidget):
         self.resize(520, 50)
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
         self.setAttribute(Qt.WA_TranslucentBackground)
+        self._init_state()
+        self._build_ui()
+        self._init_audio()
+        self._start_timer()
 
-        self.lyric_label = QLabel("♪ 点击红点识别，长按红点退出 awa", self)
-        self.lyric_label.setGeometry(120, 0, 350, 45)
-        self.lyric_label.setStyleSheet("font-size: 13px; color: #00ffff;")
-        self.lyric_opacity = QGraphicsOpacityEffect(self.lyric_label)
-        self.lyric_label.setGraphicsEffect(self.lyric_opacity)
-
-        self.close_btn = QPushButton("", self)
-        self.close_btn.setFixedSize(16, 16)
-        self.close_btn.move(485, 14)
-        self.close_btn.setStyleSheet("background-color: #ff5f56; border-radius: 8px;")
-        self.close_btn.pressed.connect(self.on_close_pressed)
-        self.close_btn.released.connect(self.on_close_released)
-
+    def _init_state(self):
         self.close_progress = 0.0
         self.is_pressing = False
         self.press_start_time = 0
-
+        self.close_anim_active = False
+        self.close_anim_progress = 0.0
         self.parsed_lyrics = []
         self.current_idx = 0
         self.start_time = 0
         self.is_syncing = False
-        self.border_angle = 0
-        self.bars = np.zeros(15)
-        self.targets = np.zeros(15)
+        self.border_angle = 0.0
+        self.bars = np.zeros(15, dtype=float)
+        self.targets = np.zeros(15, dtype=float)
+        self._last_tick = time.perf_counter()
+        self._bg_pulse = 0.0
 
+    def _build_ui(self):
+        self.lyric_label = QLabel("点击红色按钮一次开始识曲，长按关闭", self)
+        self.lyric_label.setGeometry(120, 0, 320, 45)
+        self.lyric_label.setAlignment(Qt.AlignCenter)
+        self.lyric_label.setStyleSheet(
+            "font-family: 'Microsoft YaHei UI'; font-size: 16px; font-weight: bold; color: white;"
+        )
+        self.lyric_opacity = QGraphicsOpacityEffect(self.lyric_label)
+        self.lyric_label.setGraphicsEffect(self.lyric_opacity)
+
+        self.btn_container = QWidget(self)
+        self.btn_container.setGeometry(390, 0, 110, 50)
+        self.btn_layout = QHBoxLayout(self.btn_container)
+        self.btn_layout.setContentsMargins(0, 0, 15, 0)
+        self.btn_layout.setSpacing(12)
+        self.btn_layout.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+
+        self.reset_btn = QPushButton("", self)
+        self.reset_btn.setFixedSize(14, 14)
+        self.reset_btn.setStyleSheet(
+            "background-color: #FFBD2E; border-radius: 7px; border: none;"
+        )
+        self.reset_btn.clicked.connect(self.reset_flow)
+
+        self.close_btn = QPushButton("", self)
+        self.close_btn.setFixedSize(14, 14)
+        self.close_btn.setStyleSheet(
+            "background-color: #FF5F56; border-radius: 7px; border: none;"
+        )
+        self.close_btn.pressed.connect(self.on_close_pressed)
+        self.close_btn.released.connect(self.on_close_released)
+
+        self.btn_layout.addWidget(self.reset_btn)
+        self.btn_layout.addWidget(self.close_btn)
+
+    def _init_audio(self):
         self.audio_thread = AudioThread()
-        self.audio_thread.audio_signal.connect(self.update_bars)
+        self.audio_thread.audio_signal.connect(
+            lambda v: setattr(self, "targets", np.clip(v.astype(float) * 0.4, 0.0, 1.0))
+        )
         self.audio_thread.start()
 
+    def _start_timer(self):
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.on_timer)
         self.timer.start(16)
 
-    def on_close_pressed(self):
-        self.is_pressing = True
-        self.press_start_time = time.time()
-
-    def on_close_released(self):
-        duration = time.time() - self.press_start_time
-        self.is_pressing = False
-        if duration < 0.5:
-            self.start_sync_flow()
-        self.close_progress = 0.0
-
-    def start_sync_flow(self):
-        if self.is_syncing:
-            return
-        self.is_syncing = True
-        self.lyric_label.setText("正在听歌识曲... (录制 3.5 秒)")
-        self.audio_thread.record_buffer = []
-        self.audio_thread.is_recording = True
-        QTimer.singleShot(3500, self.process_recognition)
-
-    def process_recognition(self):
-        self.audio_thread.is_recording = False
-        audio_data = b"".join(self.audio_thread.record_buffer)
-
-        res = client.asr(audio_data, "pcm", 16000, {"dev_pid": 1537})
-        if res and res["err_no"] == 0:
-            keyword = res["result"][0]
-            self.lyric_label.setText(f"🔍 搜寻: {keyword}")
-            self.fetch_netease_lrc(keyword)
-        else:
-            self.lyric_label.setText("没听清，离音箱近点试试 awa")
-            self.is_syncing = False
-
-    def fetch_netease_lrc(self, kw):
-        try:
-            headers = {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
-                "Referer": "https://music.163.com/",
-            }
-
-            search_url = "https://music.163.com/api/search/get/web"
-            params = {"s": kw, "type": 1, "limit": 1}
-
-            search_res = requests.get(
-                search_url, params=params, headers=headers, timeout=5
-            ).json()
-
-            if "result" not in search_res or "songs" not in search_res["result"]:
-                self.lyric_label.setText(f"未能匹配到歌曲: {kw}")
-                self.is_syncing = False
-                return
-
-            song = search_res["result"]["songs"][0]
-            sid = song["id"]
-            s_name = song["name"]
-            artist = song["artists"][0]["name"]
-            self.lyric_label.setText(f"♪ 正在同步: {s_name} - {artist}")
-
-            lrc_url = f"https://music.163.com/api/song/lyric?id={sid}&lv=1"
-            lrc_res = requests.get(lrc_url, headers=headers, timeout=5).json()
-
-            if "lrc" not in lrc_res or "lyric" not in lrc_res["lrc"]:
-                self.lyric_label.setText("该歌曲暂无歌词 awa")
-                self.is_syncing = False
-                return
-
-            lrc_text = lrc_res["lrc"]["lyric"]
-
-            self.parsed_lyrics = []
-            pattern = re.compile(r"\[(\d+):(\d+\.\d+)\](.*)")
-            for line in lrc_text.split("\n"):
-                m = pattern.match(line.strip())
-                if m:
-                    time_sec = int(m.group(1)) * 60 + float(m.group(2))
-                    content = m.group(3).strip()
-                    if content:
-                        self.parsed_lyrics.append((time_sec, content))
-
-            self.start_time = time.time() - 7.0
-            self.current_idx = 0
-            self.is_syncing = False
-
-        except Exception as e:
-            print(f"DEBUG - 搜歌失败详情: {e}")
-            self.lyric_label.setText("网络请求失败，请稍后再试")
-            self.is_syncing = False
-
-    def update_bars(self, v):
-        self.targets = np.clip(v * 0.5, 0, 1)
-
     def on_timer(self):
-        self.border_angle = (self.border_angle + 3) % 360
-        for i in range(15):
-            self.bars[i] += (self.targets[i] - self.bars[i]) * 0.3
+        now = time.perf_counter()
+        dt = min(now - self._last_tick, 0.05)
+        self._last_tick = now
 
-        if self.is_pressing:
-            elapsed = time.time() - self.press_start_time
-            self.close_progress = min(elapsed / 1.5, 1.0)
+        if self.is_pressing and not self.close_anim_active:
+            self.close_progress = min(self.close_progress + dt / 0.8, 1.0)
             if self.close_progress >= 1.0:
+                self.close_anim_active = True
+        elif not self.close_anim_active:
+            self.close_progress = max(0, self.close_progress - dt * 2.0)
+
+        if self.close_anim_active:
+            self.close_anim_progress += dt * 3.5
+            if self.close_anim_progress >= 1.2:
                 self.close()
-        else:
-            if self.close_progress > 0:
-                self.close_progress -= 0.1
-                if self.close_progress < 0:
-                    self.close_progress = 0
+
+        self.border_angle = (self.border_angle + 100.0 * dt) % 360.0
+        self._bg_pulse += dt * 1.5
+        for i in range(15):
+            f = (
+                (1.0 - np.exp(-25.0 * dt))
+                if self.targets[i] > self.bars[i]
+                else (1.0 - np.exp(-6.0 * dt))
+            )
+            self.bars[i] += (self.targets[i] - self.bars[i]) * f
 
         if self.parsed_lyrics and self.current_idx < len(self.parsed_lyrics):
             if (time.time() - self.start_time) >= self.parsed_lyrics[self.current_idx][
                 0
             ]:
-                self.animate_text(self.parsed_lyrics[self.current_idx][1])
+                self._anim_smooth_text(self.parsed_lyrics[self.current_idx][1])
                 self.current_idx += 1
         self.update()
-
-    def animate_text(self, text):
-        f_out = QPropertyAnimation(self.lyric_opacity, b"opacity")
-        f_out.setDuration(300)
-        f_out.setEndValue(0.0)
-        f_in = QPropertyAnimation(self.lyric_opacity, b"opacity")
-        f_in.setDuration(300)
-        f_in.setEndValue(1.0)
-        f_out.finished.connect(lambda: self.lyric_label.setText(text))
-        self.group = QSequentialAnimationGroup()
-        self.group.addAnimation(f_out)
-        self.group.addAnimation(f_in)
-        self.group.start()
 
     def paintEvent(self, event):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
-        p.setBrush(QColor(30, 30, 30, 150))
-        p.setPen(Qt.NoPen)
-        p.drawRoundedRect(self.rect(), 12, 12)
 
-        laser = QConicalGradient(self.rect().center(), self.border_angle)
-        laser.setColorAt(0, QColor(0, 255, 255))
-        laser.setColorAt(0.1, QColor(0, 255, 255, 0))
-        p.setPen(QPen(laser, 2))
-        p.drawRoundedRect(self.rect().adjusted(1, 1, -1, -6), 12, 12)
+        rect = QRectF(1, 1, self.width() - 2, self.height() - 2)
+        p.fillPath(self._get_round_path(rect, 14), QColor(20, 20, 26, 230))
 
         for i in range(15):
-            h = self.bars[i] * 25
-            p.setBrush(QColor(0, 255, 200, 200))
-            p.setPen(Qt.NoPen)
-            p.drawRoundedRect(20 + i * 7, 35 - h, 4, h + 1, 2, 2)
+            val = (self.bars[i] ** 0.7) * 15 + 2
+            r = QRectF(25 + i * 8, 42 - val, 4, val)
+            g = QLinearGradient(r.topLeft(), r.bottomLeft())
+            g.setColorAt(0, QColor(0, 255, 255))
+            g.setColorAt(1, QColor(0, 100, 255, 50))
+            p.fillRect(r, g)
 
-        if self.close_progress > 0:
-            bar_w = (self.width() - 40) * self.close_progress
-            start_x = (self.width() - bar_w) / 2
-            grad = QLinearGradient(start_x, 0, start_x + bar_w, 0)
-            grad.setColorAt(0, QColor(255, 0, 0, 50))
-            grad.setColorAt(0.5, QColor(255, 50, 50, 255))
-            grad.setColorAt(1, QColor(255, 0, 0, 50))
-            p.setBrush(QBrush(grad))
-            p.drawRoundedRect(QRectF(start_x, 44, bar_w, 3), 1.5, 1.5)
+        path = self._get_round_path(rect, 13)
+
+        outer = QConicalGradient(rect.center(), self.border_angle)
+        outer.setColorAt(0.0, QColor(0, 255, 255, 80))
+        outer.setColorAt(0.12, QColor(0, 255, 255, 0))
+        outer.setColorAt(0.5, QColor(255, 100, 200, 80))
+        outer.setColorAt(0.62, QColor(255, 100, 200, 0))
+        outer.setColorAt(1.0, QColor(0, 255, 255, 80))
+        p.setPen(QPen(outer, 6))
+        p.drawPath(path)
+
+        inner = QConicalGradient(rect.center(), self.border_angle)
+        inner.setColorAt(0.0, QColor(0, 255, 255, 255))
+        inner.setColorAt(0.06, QColor(180, 80, 255, 220))
+        inner.setColorAt(0.14, QColor(0, 255, 255, 0))
+        inner.setColorAt(0.48, QColor(255, 80, 180, 220))
+        inner.setColorAt(0.56, QColor(180, 80, 255, 220))
+        inner.setColorAt(0.64, QColor(0, 255, 255, 0))
+        inner.setColorAt(1.0, QColor(0, 255, 255, 255))
+        p.setPen(QPen(inner, 2.5))
+        p.drawPath(path)
+
+        self._draw_breathing_lights(p)
+
+        if self.close_anim_active:
+            w, h, prog = self.width(), self.height(), self.close_anim_progress
+            p.setPen(Qt.NoPen)
+
+            x1 = prog * (w + 120) - 80
+            p.setBrush(QColor(255, 20, 20, 200))
+            path1 = QPainterPath()
+            path1.moveTo(x1, 0)
+            path1.lineTo(x1 + 70, 0)
+            path1.lineTo(x1 + 30, h)
+            path1.lineTo(x1 - 40, h)
+            p.drawPath(path1)
+
+            x2 = w - (prog * (w + 120)) + 80
+            p.setBrush(QColor(255, 80, 80, 240))
+            path2 = QPainterPath()
+            path2.moveTo(x2, 0)
+            path2.lineTo(x2 - 50, 0)
+            path2.lineTo(x2 - 90, h)
+            path2.lineTo(x2 - 40, h)
+            p.drawPath(path2)
+
+        elif self.close_progress > 0:
+            center = self.close_btn.mapTo(self, self.close_btn.rect().center())
+            p.setPen(QPen(QColor(255, 60, 60, 150), 2))
+            r = 7 + 10 * self.close_progress
+            p.drawEllipse(center, r, r)
+
+    def _anim_smooth_text(self, text):
+        if hasattr(self, "_anim") and self._anim:
+            self._anim.stop()
+        f_out = QPropertyAnimation(self.lyric_opacity, b"opacity")
+        f_out.setDuration(150)
+        f_out.setStartValue(self.lyric_opacity.opacity())
+        f_out.setEndValue(0.0)
+        f_in = QPropertyAnimation(self.lyric_opacity, b"opacity")
+        f_in.setDuration(200)
+        f_in.setStartValue(0.0)
+        f_in.setEndValue(1.0)
+        f_out.finished.connect(lambda: self.lyric_label.setText(text))
+        self._anim = QSequentialAnimationGroup()
+        self._anim.addAnimation(f_out)
+        self._anim.addAnimation(f_in)
+        self._anim.start()
+
+    def _get_round_path(self, rect, radius):
+        path = QPainterPath()
+        path.addRoundedRect(rect, radius, radius)
+        return path
+
+    def _draw_breathing_lights(self, p):
+        for btn, color in [
+            (self.reset_btn, QColor(255, 189, 46)),
+            (self.close_btn, QColor(255, 95, 86)),
+        ]:
+            center = btn.mapTo(self, btn.rect().center())
+            pulse = 0.5 + 0.5 * np.sin(
+                self._bg_pulse + (0 if btn == self.reset_btn else 3.14)
+            )
+            g = QRadialGradient(center.x(), center.y(), 10 + pulse * 6)
+            g.setColorAt(
+                0, QColor(color.red(), color.green(), color.blue(), int(130 * pulse))
+            )
+            g.setColorAt(1, QColor(0, 0, 0, 0))
+            p.fillPath(self._get_circle_path(center.x(), center.y(), 10 + pulse * 6), g)
+
+    def _get_circle_path(self, x, y, r):
+        path = QPainterPath()
+        path.addEllipse(x - r, y - r, r * 2, r * 2)
+        return path
+
+    def reset_flow(self):
+        self.parsed_lyrics = []
+        self.current_idx = 0
+        self._anim_smooth_text("已经终止当前识曲")
+
+    def on_close_pressed(self):
+        self.is_pressing = True
+        self.press_start_time = time.perf_counter()
+
+    def on_close_released(self):
+        if (time.perf_counter() - self.press_start_time) < 0.4:
+            self.start_sync_flow()
+        self.is_pressing = False
+
+    def start_sync_flow(self):
+        if self.is_syncing:
+            return
+        self.is_syncing = True
+        self._anim_smooth_text("🔍 正在扫描...")
+        QTimer.singleShot(100, self._perform_scan)
+
+    def _perform_scan(self):
+        targets = ["PotPlayer", "Chrome", "Edge", "Firefox", "网易云音乐"]
+        found_kw = ""
+        try:
+            for w in gw.getAllWindows():
+                if (
+                    w.visible
+                    and any(t in w.title for t in targets)
+                    and " - " in w.title
+                ):
+                    found_kw = w.title
+                    break
+            if found_kw:
+                for t in targets:
+                    found_kw = found_kw.replace(f" - {t}", "").replace(t, "")
+                found_kw = re.sub(r"[\(\[\{].*?[\)\]\}]", "", found_kw)
+                found_kw = re.sub(
+                    r"\.(mp3|flac|wav|m4a)$", "", found_kw, flags=re.I
+                ).strip()
+                self._anim_smooth_text(f"♪ 匹配中: {found_kw}")
+                self.fetch_netease_lrc(found_kw)
+            else:
+                self._anim_smooth_text("未检测到播放源")
+                self.is_syncing = False
+        except:
+            self.is_syncing = False
+
+    def fetch_netease_lrc(self, keyword):
+        try:
+            s_res = requests.get(
+                f"http://localhost:3000/cloudsearch?keywords={keyword}", timeout=3
+            ).json()
+            sid = s_res["result"]["songs"][0]["id"]
+            l_res = requests.get(
+                f"http://localhost:3000/lyric?id={sid}", timeout=3
+            ).json()
+            raw_lrc = l_res.get("lrc", {}).get("lyric", "")
+            self.parsed_lyrics = []
+            for line in raw_lrc.split("\n"):
+                if any(x in line for x in ["ar:", "ti:", "al:", "by:"]):
+                    continue
+                m = re.match(r"\[(\d+):(\d+\.\d+)\](.*)", line.strip())
+                if m and m.group(3).strip():
+                    self.parsed_lyrics.append(
+                        (int(m.group(1)) * 60 + float(m.group(2)), m.group(3).strip())
+                    )
+            self.start_time = time.time()
+            self.current_idx = 0
+            self._anim_smooth_text("成功")
+        except:
+            self._anim_smooth_text("Node.js 接口异常")
+        finally:
+            self.is_syncing = False
 
     def mousePressEvent(self, e):
         if e.button() == Qt.LeftButton:
