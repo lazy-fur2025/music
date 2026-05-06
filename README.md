@@ -70,3 +70,11 @@ npx NeteaseCloudMusicApi
 ```
 
 ---
+
+### 5⃣ 启动项目
+
+```bash
+python Wow.py
+```
+
+---
