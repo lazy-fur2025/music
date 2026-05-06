@@ -34,7 +34,7 @@
 
 ```bash
 git clone https://github.com/lazy-fur2025/music.git
-cd Music
+cd music\Music    #因为是个嵌套文件夹，可能核心文件需要进一级锁定。
 ```
 ---
 
