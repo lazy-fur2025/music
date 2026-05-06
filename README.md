@@ -38,7 +38,7 @@ cd Music
 ```
 ---
 
-###2️⃣ 创建虚拟环境（推荐）
+### 2️⃣ 创建虚拟环境（推荐）
 
 ```bash
 python -m venv venv
@@ -54,7 +54,7 @@ source venv/bin/activate
 
 ---
 
-###3️⃣ 安装 Python 依赖
+### 3️⃣ 安装 Python 依赖
 
 ```bash
 #建议更新一下pip版本以防万一。
@@ -63,7 +63,7 @@ pip install -r requirements.txt
 ```
 ---
 
-###4️⃣ 启动 Node.js 服务（用于获取歌词）
+### 4️⃣ 启动 Node.js 服务（用于获取歌词）
 
 ```bash
 npx NeteaseCloudMusicApi
