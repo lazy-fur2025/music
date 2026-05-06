@@ -34,7 +34,7 @@
 
 ```bash
 git clone https://github.com/lazy-fur2025/music.git
-cd music
+cd Music
 ```
 ---
 
