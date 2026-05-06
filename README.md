@@ -71,10 +71,21 @@ npx NeteaseCloudMusicApi
 
 ---
 
-### 5⃣ 启动项目
+### 5️⃣ 启动项目
 
 ```bash
 python Wow.py
 ```
+
+---
+
+## 📬 联系手段
+
+如果你发现任何bug或其他想法，如果是一些原则性问题，一定一定（求你了QmQ）要联系我即刻改正。
+其实你要是想发邮箱对我发牢骚的话，也不是不行，就是我看邮箱的频率低到离谱（但是不会不看）。
+呃，如果你通过外网联系我，我可能回复频率更低（因为我只用AI工具awa）。
+
+- GitHub Issues: https://github.com/lazy-fur2025/music/issues
+- Email: megalovaina@163.com
 
 ---
